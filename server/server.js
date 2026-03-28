@@ -2,14 +2,18 @@ import dotenv from "dotenv";
 import express from "express";
 import authRouter from "./routes/authRoutes.js";
 import cors from "cors";
-import connectDB from "./utils/db.js";
+import connectDB from "./lib/db.js";
 import profileRouter from "./routes/profileRoute.js";
 import passport from "passport";
 import session from "express-session";
-import "./utils/passport.js";
+import "./lib/passport.js";
+import { WebSocketServer } from "ws";
+import http from "http";
+import { server, app } from "./websocket.js";
+import messageRouter from "./routes/messageRoute.js";
 
 dotenv.config();
-const app = express();
+// const app = express();
 
 app.use(express.json());
 app.use(
@@ -33,7 +37,12 @@ app.use(passport.session());
 
 // Facebook Login Route
 
+// const server = http.createServer(app);
+// // WebSocket
+// initWebSocket(server);
+
 app.use("/api/auth", authRouter);
 app.use("/api/profile", profileRouter);
+app.use("/api/messages", messageRouter);
 
-app.listen(process.env.PORT, () => console.log(`🚀 Server running on port ${process.env.PORT}`));
+server.listen(process.env.PORT, () => console.log(`🚀 Server running on port ${process.env.PORT}`));

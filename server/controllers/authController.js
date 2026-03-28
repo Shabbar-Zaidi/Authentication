@@ -1,5 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
-import { generateToken } from "../utils/generateToken.js";
+import { generateToken } from "../lib/generateToken.js";
 import bcrypt from "bcrypt";
 import User from "../models/userModel.js";
 import crypto from "crypto";
@@ -231,7 +231,6 @@ export const resetPassword = async (req, res) => {
     }
 
     // Data must be send and recieve via encryption model
-    
 
     const user = await User.findOne({
       resetPasswordCode: token,
@@ -272,6 +271,7 @@ export const checkAuth = async (req, res) => {
     res.status(400).json({ success: false, message: error.message });
   }
 };
+
 
 export const continuewithfb = async (req, res) => {
   try {

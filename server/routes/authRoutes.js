@@ -3,7 +3,7 @@ import passport from "passport";
 import { continuewithlogin, continuewithfb, loginUser, signupUser, verifyEmail, forgotPassword, resetPassword, checkAuth, resendVerification } from "../controllers/authController.js";
 import { verifyToken } from "../middlewares/authMiddleware.js";
 
-const  authRouter = express.Router();
+const authRouter = express.Router();
 
 // auth routes
 authRouter.post("/google", continuewithlogin);

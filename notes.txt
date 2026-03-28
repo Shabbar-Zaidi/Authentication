@@ -4,3 +4,583 @@ profile, update, delete,
 user -> signup -> main 
 user -> login ->  main
 user -> forgotpassword ->  
+
+
+# MERN Chat App (using `ws` — WebSocket library)
+
+This document contains a full-stack MERN chat application that uses the low-level `ws` WebSocket library for real-time communication. It includes:
+
+* Project folder structure
+* Backend (Node.js + Express + Mongoose + `ws`) with JWT auth and message persistence
+* Frontend (React) that logs in/registers, connects to the WebSocket server using JWT, sends/receives messages, shows online users and message history
+* `package.json` examples and `.env` example
+
+> **Note:** This is a working, opinionated starter. You can expand rooms, typing indicators, file attachments, delivery receipts, etc.
+
+---
+
+## Project folder structure
+
+```
+mern-chat-ws/
+├─ server/
+│  ├─ package.json
+│  ├─ .env.example
+│  ├─ src/
+│  │  ├─ index.js               # entry point (Express + HTTP + ws server)
+│  │  ├─ config/db.js          # mongoose connection
+│  │  ├─ models/User.js
+│  │  ├─ models/Message.js
+│  │  ├─ routes/auth.js        # register/login
+│  │  ├─ middleware/auth.js    # express JWT auth middleware
+│  │  └─ ws-handler.js         # ws server handling logic (authenticate, broadcast)
+│  └─ README.md
+
+├─ client/
+│  ├─ package.json
+│  ├─ public/
+│  │  └─ index.html
+│  └─ src/
+│     ├─ index.js
+│     ├─ App.js
+│     ├─ api.js                # REST helpers (register/login, fetch history)
+│     ├─ wsClient.js           # wrapper to create ws connection with token
+│     ├─ components/
+│     │  ├─ Login.js
+│     │  ├─ Chat.js
+│     │  └─ MessageList.js
+│     └─ styles.css
+
+└─ README.md
+```
+
+---
+
+## 1) Backend
+
+### server/package.json
+
+```json
+{
+  "name": "mern-chat-ws-server",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.0.0",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
+```
+
+### server/.env.example
+
+```
+PORT=4000
+MONGO_URI=mongodb://localhost:27017/mern_chat_ws
+JWT_SECRET=replace_with_a_strong_secret
+CLIENT_ORIGIN=http://localhost:3000
+```
+
+### server/src/config/db.js
+
+```javascript
+const mongoose = require('mongoose');
+
+async function connect(uri) {
+  await mongoose.connect(uri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  });
+  console.log('MongoDB connected');
+}
+
+module.exports = { connect };
+```
+
+### server/src/models/User.js
+
+```javascript
+const mongoose = require('mongoose');
+
+const UserSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  passwordHash: { type: String, required: true }
+}, { timestamps: true });
+
+module.exports = mongoose.model('User', UserSchema);
+```
+
+### server/src/models/Message.js
+
+```javascript
+const mongoose = require('mongoose');
+
+const MessageSchema = new mongoose.Schema({
+  from: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  text: { type: String },
+  createdAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('Message', MessageSchema);
+```
+
+### server/src/routes/auth.js
+
+```javascript
+const express = require('express');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+const router = express.Router();
+
+router.post('/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ message: 'Missing fields' });
+  try {
+    const existing = await User.findOne({ username });
+    if (existing) return res.status(409).json({ message: 'Username taken' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({ username, passwordHash });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET);
+    res.json({ user: { id: user._id, username: user.username }, token });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ message: 'Missing fields' });
+  try {
+    const user = await User.findOne({ username });
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET);
+    res.json({ user: { id: user._id, username: user.username }, token });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+module.exports = router;
+```
+
+### server/src/middleware/auth.js
+
+```javascript
+const jwt = require('jsonwebtoken');
+
+function expressAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({ message: 'No token' });
+  const token = auth.split(' ')[1];
+  try {
+    const data = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = data;
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
+}
+
+module.exports = { expressAuth };
+```
+
+### server/src/ws-handler.js
+
+```javascript
+// Handles ws connections: authenticate using token in query, map sockets to users, broadcast messages, persist messages
+const jwt = require('jsonwebtoken');
+const url = require('url');
+const Message = require('./models/Message');
+
+// Map userId -> ws
+const clients = new Map();
+
+function setupWsServer(wss) {
+  wss.on('connection', async function connection(ws, req) {
+    // Authenticate: token sent as ?token=... in WebSocket URL
+    const { query } = url.parse(req.url, true);
+    const token = query.token;
+    if (!token) {
+      ws.send(JSON.stringify({ type: 'error', message: 'No token provided' }));
+      ws.close();
+      return;
+    }
+
+    let user;
+    try {
+      user = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid token' }));
+      ws.close();
+      return;
+    }
+
+    // store
+    ws.user = user; // { id, username }
+    clients.set(user.id, ws);
+
+    // Send existing last 50 messages
+    const recent = await Message.find().sort({ createdAt: 1 }).limit(200).populate('from', 'username');
+    ws.send(JSON.stringify({ type: 'history', messages: recent.map(m => ({ id: m._id, text: m.text, from: m.from.username, createdAt: m.createdAt })) }));
+
+    // Notify others about presence
+    broadcast({ type: 'presence', user: { id: user.id, username: user.username }, action: 'online' });
+
+    ws.on('message', async (raw) => {
+      try {
+        const msg = JSON.parse(raw);
+        if (msg.type === 'message') {
+          // Save to DB
+          const saved = await Message.create({ from: user.id, text: msg.text });
+          const out = { type: 'message', message: { id: saved._id, from: user.username, text: saved.text, createdAt: saved.createdAt } };
+          broadcast(out);
+        }
+      } catch (err) {
+        console.error('ws message error', err);
+      }
+    });
+
+    ws.on('close', () => {
+      clients.delete(user.id);
+      broadcast({ type: 'presence', user: { id: user.id, username: user.username }, action: 'offline' });
+    });
+  });
+}
+
+function broadcast(obj) {
+  const data = JSON.stringify(obj);
+  for (const [, clientWs] of clients) {
+    if (clientWs.readyState === clientWs.OPEN) clientWs.send(data);
+  }
+}
+
+module.exports = { setupWsServer };
+```
+
+### server/src/index.js
+
+```javascript
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const { WebSocketServer } = require('ws');
+const { connect } = require('./config/db');
+const authRoutes = require('./routes/auth');
+const { setupWsServer } = require('./ws-handler');
+const Message = require('./models/Message');
+
+const app = express();
+app.use(express.json());
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || '*' }));
+
+app.use('/api/auth', authRoutes);
+
+// simple endpoint to fetch recent messages (protected if you want)
+app.get('/api/messages', async (req, res) => {
+  const msgs = await Message.find().sort({ createdAt: 1 }).populate('from', 'username');
+  res.json(msgs.map(m => ({ id: m._id, from: m.from.username, text: m.text, createdAt: m.createdAt })));
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws' });
+setupWsServer(wss);
+
+const PORT = process.env.PORT || 4000;
+connect(process.env.MONGO_URI).then(() => {
+  server.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+});
+```
+
+---
+
+## 2) Frontend (React)
+
+We'll provide a simple React app that logs in/registers, stores the JWT in `localStorage`, connects to the WebSocket server at `ws://localhost:4000/ws?token=...`, and handles events.
+
+### client/package.json
+
+```json
+{
+  "name": "mern-chat-ws-client",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-scripts": "5.0.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  }
+}
+```
+
+### client/src/api.js
+
+```javascript
+const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:4000/api';
+
+export async function register(username, password) {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  return res.json();
+}
+
+export async function login(username, password) {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  return res.json();
+}
+
+export async function fetchMessages() {
+  const res = await fetch(`${API_BASE}/messages`);
+  return res.json();
+}
+```
+
+### client/src/wsClient.js
+
+```javascript
+// Lightweight wrapper to create a WebSocket with reconnection attempts
+export function createWs(token, onOpen, onMessage, onClose) {
+  const url = `${(window.location.protocol === 'https:' ? 'wss' : 'ws')}://` + (process.env.REACT_APP_WS_HOST || 'localhost:4000') + `/ws?token=${encodeURIComponent(token)}`;
+  let ws;
+  let attempts = 0;
+  function connect() {
+    ws = new WebSocket(url);
+    ws.onopen = (e) => { attempts = 0; onOpen && onOpen(e); };
+    ws.onmessage = (e) => { onMessage && onMessage(JSON.parse(e.data)); };
+    ws.onclose = (e) => { onClose && onClose(e); setTimeout(() => { attempts++; connect(); }, Math.min(10000, 1000 * attempts)); };
+    ws.onerror = (err) => console.error('WS error', err);
+  }
+  connect();
+  return {
+    send(obj) { if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)); }
+  };
+}
+```
+
+### client/src/components/Login.js
+
+```javascript
+import React, { useState } from 'react';
+import { login, register } from '../api';
+
+export default function Login({ onAuth }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState('login');
+  const [err, setErr] = useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    setErr(null);
+    try {
+      const res = mode === 'login' ? await login(username, password) : await register(username, password);
+      if (res.token) {
+        localStorage.setItem('token', res.token);
+        onAuth(res.user, res.token);
+      } else {
+        setErr(res.message || 'Auth failed');
+      }
+    } catch (err) { setErr('Network error'); }
+  }
+
+  return (
+    <div className="login">
+      <h2>{mode === 'login' ? 'Login' : 'Register'}</h2>
+      <form onSubmit={submit}>
+        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="username" required />
+        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="password" type="password" required />
+        <button type="submit">{mode === 'login' ? 'Login' : 'Register'}</button>
+      </form>
+      <button onClick={()=>setMode(mode === 'login' ? 'register' : 'login')}>Switch to {mode === 'login' ? 'Register' : 'Login'}</button>
+      {err && <div className="error">{err}</div>}
+    </div>
+  );
+}
+```
+
+### client/src/components/MessageList.js
+
+```javascript
+import React from 'react';
+
+export default function MessageList({ messages }) {
+  return (
+    <div className="msgs">
+      {messages.map(m => (
+        <div key={m.id} className="msg">
+          <div className="meta"><strong>{m.from}</strong> <small>{new Date(m.createdAt).toLocaleTimeString()}</small></div>
+          <div className="text">{m.text}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### client/src/components/Chat.js
+
+```javascript
+import React, { useState, useEffect, useRef } from 'react';
+import MessageList from './MessageList';
+import { fetchMessages } from '../api';
+import { createWs } from '../wsClient';
+
+export default function Chat({ user, token }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    let wsClient = createWs(token,
+      () => console.log('ws open'),
+      (msg) => {
+        if (msg.type === 'history') setMessages(msg.messages);
+        else if (msg.type === 'message') setMessages(prev => [...prev, msg.message]);
+        else if (msg.type === 'presence') console.log('presence', msg);
+      },
+      () => console.log('ws closed')
+    );
+    wsRef.current = wsClient;
+
+    // also fetch via REST as fallback
+    fetchMessages().then(arr => { if (arr && arr.length) setMessages(arr); });
+
+    return () => { /* no explicit close in this wrapper */ };
+  }, [token]);
+
+  function send() {
+    if (!input.trim()) return;
+    wsRef.current.send({ type: 'message', text: input });
+    setInput('');
+  }
+
+  return (
+    <div className="chat">
+      <h3>Welcome, {user.username}</h3>
+      <MessageList messages={messages} />
+      <div className="composer">
+        <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Type a message" />
+        <button onClick={send}>Send</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### client/src/App.js
+
+```javascript
+import React, { useState, useEffect } from 'react';
+import Login from './components/Login';
+import Chat from './components/Chat';
+
+function App(){
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
+
+  useEffect(()=>{
+    if (token && !user) {
+      // Optionally decode token to populate username or call an endpoint
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUser({ id: payload.id, username: payload.username });
+      } catch(e){ console.log('failed decode'); }
+    }
+  }, [token, user]);
+
+  function onAuth(u, t) {
+    setUser(u); setToken(t);
+  }
+
+  if (!token || !user) return <Login onAuth={onAuth} />;
+  return <Chat user={user} token={token} />;
+}
+
+export default App;
+```
+
+### client/src/index.js
+
+```javascript
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles.css';
+
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
+```
+
+### client/src/styles.css
+
+```css
+body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 16px; }
+.login { max-width: 360px; margin: 40px auto; }
+.chat { max-width: 720px; margin: 20px auto; }
+.msgs { height: 60vh; overflow: auto; border: 1px solid #ddd; padding: 8px; }
+.msg { padding: 6px; margin-bottom: 6px; border-radius: 6px; background: #f7f7f7; }
+.composer { display:flex; gap:8px; margin-top:8px; }
+input { padding:8px; flex:1 }
+button { padding:8px 12px }
+```
+
+---
+
+## 3) How to run
+
+1. Install MongoDB and ensure it's running.
+2. Backend:
+
+   * `cd server`
+   * copy `.env.example` to `.env` and edit values
+   * `npm install`
+   * `npm run dev` (or `npm start`)
+3. Frontend:
+
+   * `cd client`
+   * `npm install`
+   * `npm start`
+4. Open `http://localhost:3000` and register/login. The app will connect to `ws://localhost:4000/ws?token=...`.
+
+---
+
+## 4) Notes & Next steps
+
+* This implementation uses JWT in the `?token=` query param during WS handshake. In production, consider more secure transport (wss + secure cookies).
+* Add input validation, rate limiting, message sanitization, pagination for message history, and rooms.
+* Add typing indicators, message edits/deletes and read receipts if needed.
+
+---
+
+If you want, I can:
+
+* Extract this into downloadable files (server + client) ready to run.
+* Add support for chat rooms and private messages.
+* Convert the frontend to Next.js or Tailwind styling.

@@ -9,13 +9,13 @@ import { useAppContext } from "./context/AppContext";
 import EmailVerification from "./pages/EmailVerification";
 import ResetPassword from "./pages/ResetPassword";
 import ForgotPassword from "./pages/ForgotPassword";
-
+import Dashboard from "./pages/Dashboard";
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, setIsAuthenticated, user, setUser } = useAppContext();
   console.log("ProtectedRoute - isAuthenticated:", isAuthenticated, "user:", user);
 
   // If authenticated but user is not loaded into context, try to hydrate from localStorage
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated && !user) {
       const stored = localStorage.getItem("user");
       if (stored) {
@@ -85,32 +85,11 @@ function App() {
   return (
     <div>
       <Routes>
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Profile />
-            </ProtectedRoute>
-          }
-        />
+        {/* <Route path="/" element={<Profile />} /> */}
 
-        <Route
-          path="/register"
-          element={
-            <RedirectAuthenticatedUser>
-              <Login />
-            </RedirectAuthenticatedUser>
-          }
-        />
+        <Route path="/register" element={<Login />} />
         <Route path="/verify-email" element={<EmailVerification />} />
-        <Route
-          path="/forgot-password"
-          element={
-            <RedirectAuthenticatedUser>
-              <ForgotPassword />
-            </RedirectAuthenticatedUser>
-          }
-        />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
 
         <Route
           path="/reset-password/:token"
@@ -120,9 +99,12 @@ function App() {
             </RedirectAuthenticatedUser>
           }
         />
-        {/* catch all routes */}
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      {/* <Routes>
+        <Route path="/" element={<Dashboard />} />
+      </Routes> */}
       <Toaster />
     </div>
   );

@@ -16,7 +16,8 @@ const EmailVerification = () => {
       if (res.data.success) {
         toast.success("Email verified successfully!");
         // Redirect to profile or home page
-        navigate("/");
+        // navigate("/");
+        window.location.href = "/";
       } else {
         toast.error(res.data.message || "Verification failed");
       }

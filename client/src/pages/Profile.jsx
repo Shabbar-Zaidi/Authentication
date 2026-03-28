@@ -20,7 +20,7 @@ const Profile = () => {
         console.error("Error fetching profile:", err);
       }
     };
-    fetchProfile();
+    return () => fetchProfile();
   }, []);
 
   // useEffect(() => {
@@ -61,30 +61,33 @@ const Profile = () => {
 
   return (
     <>
-      {!profileData ? (
+      <div className="bg-[rgb(19,22,25)] text-white h-screen flex items-center justify-center">
+        <p>Loading profile...</p>
+      </div>
+      {/* {!profileData ? (
         <div className="bg-[rgb(19,22,25)] text-white h-screen flex items-center justify-center">
           <p>Loading profile...</p>
         </div>
-      ) : (
-        <div className="bg-[rgb(19,22,25)] text-white h-screen">
-          <div className="flex flex-col justify-center items-center h-full gap-4">
-            <img className="w-50 h-50 rounded-full" src={profileData.picture ? profileData.picture : assets.profile_sidebar} alt="" />
-            <h2>Welcome, {profileData.name}</h2>
-            <p>Email: {profileData.email}</p>
-            <p>First Name: {profileData.name.split(" ")[0]}</p>
-            <p>Last Name: {profileData.name.split(" ")[1]}</p>
-            <p>Auth Provider: {profileData.authProvider}</p>
-            <div>
-              <button onClick={deleteProfile} className="bg-red-600 px-2 py-3 mx-2 rounded-lg cursor-pointer">
-                Delete
-              </button>
-              <button onClick={editProfile} className="bg-blue-600 px-2 py-3 mx-2 rounded-lg">
-                Edit
-              </button>
-            </div>
+      ) : ( */}
+      {/* <div className="bg-[rgb(19,22,25)] text-white h-screen">
+        <div className="flex flex-col justify-center items-center h-full gap-4">
+          <img className="w-50 h-50 rounded-full" src={profileData.picture ? profileData.picture : assets.profile_sidebar} alt="" />
+          <h2>Welcome, {profileData.name}</h2>
+          <p>Email: {profileData.email}</p>
+          <p>First Name: {profileData.name.split(" ")[0]}</p>
+          <p>Last Name: {profileData.name.split(" ")[1]}</p>
+          <p>Auth Provider: {profileData.authProvider}</p>
+          <div>
+            <button onClick={deleteProfile} className="bg-red-600 px-2 py-3 mx-2 rounded-lg cursor-pointer">
+              Delete
+            </button>
+            <button onClick={editProfile} className="bg-blue-600 px-2 py-3 mx-2 rounded-lg">
+              Edit
+            </button>
           </div>
         </div>
-      )}
+      </div> */}
+      {/* )} */}
     </>
   );
 };

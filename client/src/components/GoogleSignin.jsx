@@ -24,8 +24,8 @@ function GoogleSignin() {
         localStorage.setItem("token", res.data.token);
         localStorage.setItem("user", JSON.stringify(res.data.user));
         setUser(res.data.user);
-        // navigate('/profile')
-        window.location.href = "/profile";
+        // navigate("/");
+        window.location.href = "/";
       } catch (err) {
         console.error(err);
       }
