@@ -5,7 +5,7 @@ import { verifyToken } from "../middlewares/authMiddleware.js";
 
 const authRouter = express.Router();
 
-// auth routes
+// Auth routes
 authRouter.post("/google", continuewithlogin);
 authRouter.post("/login", loginUser);
 authRouter.post("/signup", signupUser);
@@ -22,7 +22,7 @@ authRouter.get(
   passport.authenticate("facebook", {
     failureRedirect: "http://localhost:5173/register",
   }),
-  continuewithfb
+  continuewithfb,
 );
 
 export default authRouter;
